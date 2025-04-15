@@ -1,0 +1,144 @@
+import os
+import requests
+import json
+import nltk
+from nltk.tokenize import word_tokenize
+from nltk.corpus import stopwords
+from nltk.util import ngrams
+from collections import Counter
+from pydrive2.auth import GoogleAuth
+from pydrive2.drive import GoogleDrive
+
+CLIENT_SECRET_FILE = "client_secrets.json"
+SALVA_SU = "entrambi"
+from pydrive.auth import GoogleAuth
+from pydrive.drive import GoogleDrive
+
+def autenticazione_drive():
+    """Autentica l'accesso a Google Drive e crea la cartella NASA_Images se non esiste."""
+    gauth = GoogleAuth()
+    gauth.LocalWebserverAuth()  # Aprirà il browser per autenticarti la prima volta
+    drive = GoogleDrive(gauth)
+
+    # Nome della cartella
+    folder_name = "NASA_Images"
+    folder_id = None
+
+    # Query per trovare la cartella su Google Drive
+    query = f"mimeType='application/vnd.google-apps.folder' and title='{folder_name}' and trashed=false"
+    
+    try:
+        file_list = drive.ListFile({'q': query}).GetList()
+        
+        if file_list:
+            folder_id = file_list[0]['id']
+            print(f"📂 Cartella trovata su Google Drive: {folder_name}")
+        else:
+            folder_metadata = {
+                'title': folder_name,
+                'mimeType': 'application/vnd.google-apps.folder',
+                'parents': [{'id': 'root'}]  # Specifica che deve essere nella root
+            }
+            folder = drive.CreateFile(folder_metadata)
+            folder.Upload()
+            folder_id = folder['id']
+            print(f"📂 Cartella creata su Google Drive: {folder_name}")
+    
+    except Exception as e:
+        print(f"⚠️ Errore nella ricerca/creazione della cartella su Google Drive: {e}")
+        return None, None
+
+    return drive, folder_id
+
+
+# 🔹 Avvia l'autenticazione
+drive, drive_folder_id = autenticazione_drive()
+
+# Scarichiamo le risorse di nltk (solo la prima volta)
+nltk.download('punkt')
+nltk.download('stopwords')
+
+# 🔹 INSERISCI QUI IL TUO TESTO
+testo = """
+There are several possible benefits in exploring the main asteroid belts:1. Scientific Understanding: Studying the asteroids in the main belt can provide valuable insights into the formation and evolution of our solar system. By analyzing their composition and structure, scientists can learn more about the early conditions in our solar system and how planets and other celestial bodies were formed.2. Resource Exploration: The main asteroid belt is known to contain a wide range of resources, including metals such as iron, nickel, and platinum group metals. These resources could potentially be mined and utilized for various purposes, such as space exploration, manufacturing, and energy production.3. Space Exploration Support: Exploring the main asteroid belt can also serve as a stepping stone for future space missions. Asteroids could potentially be used as refueling stations or bases for further exploration of the solar system, providing valuable resources and reducing the costs and challenges associated with deep space travel.4. Planetary Defense: By studying the main asteroid belt, scientists can identify and track potentially hazardous asteroids that may pose a threat to Earth. This knowledge can help in developing strategies and technologies to deflect or mitigate the impact of such asteroids, thus protecting our planet from potential catastrophic events.5. Astronomical Research: The main asteroid belt provides a unique opportunity for astronomers to study small celestial bodies up close. Observations and studies of asteroids can help in refining our understanding of their physical properties, orbital dynamics, and interactions with other objects in the solar system.Overall, exploring the main asteroid belt holds great potential for enhancing our scientific knowledge, unlocking valuable resources, supporting space exploration, ensuring planetary defense, and advancing astronomical research."""
+
+# Funzione per estrarre parole chiave
+def extract_keywords(text, num_keywords=5):
+    """ Estrai bigrammi e trigrammi per migliorare la ricerca """
+    words = word_tokenize(text.lower())
+    words = [word for word in words if word.isalnum() and word not in stopwords.words("english")]
+
+    bigrams = list(ngrams(words, 2))
+    trigrams = list(ngrams(words, 3))
+
+    all_phrases = [" ".join(gram) for gram in bigrams + trigrams]
+    common_phrases = Counter(all_phrases).most_common(num_keywords)
+
+    keywords = [phrase[0] for phrase in common_phrases]
+    return keywords
+
+# Estrarre parole chiave e generare la query
+parole_chiave = extract_keywords(testo, num_keywords=3)
+query_completa = " ".join(parole_chiave)  # Unisce tutte le parole chiave in una sola query
+print(f"🔑 Query finale: {query_completa}")
+
+# Funzione per cercare immagini nel database NASA usando tutte le parole chiave insieme
+def cerca_immagini_nasa(query, num_images=5):
+    """ Cerca immagini NASA per gruppi di parole chiave """
+    api_url = "https://images-api.nasa.gov/search"
+    params = {"q": query, "media_type": "image"}
+    response = requests.get(api_url, params=params)
+    immagini_salvate = []
+
+    if response.status_code == 200:
+        data = response.json()
+        items = data.get("collection", {}).get("items", [])
+
+        for i, item in enumerate(items[:num_images]):
+            links = item.get("links", [])
+            if links:
+                image_url = links[0].get("href")
+                immagini_salvate.append(image_url)
+                print(f"✅ Immagine trovata: {image_url}")
+
+    else:
+        print(f"⚠️ Errore nella ricerca immagini NASA")
+
+    return immagini_salvate
+
+# Funzione per scaricare immagini
+def scarica_e_carica_immagini(immagini, cartella="downloaded_nasa_images"):
+    if SALVA_SU in ["locale", "entrambi"] and not os.path.exists(cartella):
+        os.makedirs(cartella)
+
+    for i, img_url in enumerate(immagini):
+        try:
+            response = requests.get(img_url, stream=True)
+            if response.status_code == 200:
+                estensione = img_url.split(".")[-1]
+                file_path = os.path.join(cartella, f"nasa_image_{i+1}.{estensione}")
+
+                # Salva localmente
+                if SALVA_SU in ["locale", "entrambi"]:
+                    with open(file_path, "wb") as file:
+                        for chunk in response.iter_content(1024):
+                            file.write(chunk)
+                    print(f"📥 Immagine salvata localmente: {file_path}")
+
+                # Carica su Google Drive
+                if SALVA_SU in ["drive", "entrambi"]:
+                    file_drive = drive.CreateFile({'title': f"nasa_image_{i+1}.{estensione}", 'parents': [{'id': drive_folder_id}]})
+                    file_drive.SetContentFile(file_path)
+                    file_drive.Upload()
+                    print(f"🚀 Immagine caricata su Google Drive: {file_drive['title']}")
+
+            else:
+                print(f"⚠️ Errore nel download: {img_url}")
+
+        except Exception as e:
+            print(f"⚠️ Errore nel salvataggio/caricamento: {e}")
+
+# Esegui la ricerca immagini NASA usando la query completa
+# Esegui la ricerca immagini NASA usando la query completa
+immagini_nasa = cerca_immagini_nasa(query_completa, num_images=10)
+scarica_e_carica_immagini(immagini_nasa)
