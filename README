@@ -1,0 +1,17 @@
+# 🔭 Mars Image Downloader
+
+Un semplice script Python che, a partire da una descrizione testuale o da parametri configurati, scarica automaticamente le immagini scattate dai rover della NASA su Marte e le salva in una cartella locale.
+
+## 🚀 Funzionalità
+
+- Recupera immagini marziane usando le **NASA Mars Rover Photos API**
+- Permette di specificare:
+  - Nome del rover (*Curiosity*, *Opportunity*, *Spirit*)
+  - Data terrestre (`earth_date`) o sol marziano (`sol`)
+  - Fotocamera desiderata
+- Salva automaticamente le immagini in una cartella organizzata
+
+## 📦 Requisiti
+
+- Python 3.7+
+- Una chiave API gratuita della NASA: [Registrati qui](https://api.nasa.gov)
